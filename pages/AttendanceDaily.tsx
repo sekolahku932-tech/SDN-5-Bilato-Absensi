@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../store';
 import { UserRole, AttendanceStatus, AttendanceRecord, Student } from '../types';
-import { Save, MessageCircle, Share2, Send, X, CheckCircle, Smartphone, CalendarOff, Upload } from 'lucide-react';
+import { Save, MessageCircle, Share2, Send, X, CheckCircle, Smartphone, CalendarOff, Upload, RotateCcw } from 'lucide-react';
+import { CLASS_LIST } from '../constants';
 
 const AttendanceDaily: React.FC = () => {
   const { students, attendance, holidays, markAttendance, currentUser, academicYears, triggerSave } = useApp();
@@ -20,47 +21,39 @@ const AttendanceDaily: React.FC = () => {
 
   const activeYear = academicYears.find(y => y.isActive);
 
-  // --- LOGIKA PENGECEKAN TANGGAL YANG SUPER KETAT ---
-  
-  // 1. Normalisasi Tanggal ke YYYY-MM-DD untuk memastikan perbandingan string 100% akurat
+  // --- LOGIKA TANGGAL & LIBUR ---
   const normalizeDate = (dateStr: string) => {
     if (!dateStr) return '';
-    return dateStr.trim().split('T')[0]; // Ambil YYYY-MM-DD saja, buang jam jika ada
+    return dateStr.trim().split('T')[0];
   };
 
-  // 2. Cek Weekend dengan konstruksi tanggal manual (Hindari Bug Timezone)
   const isWeekend = (dateStr: string) => {
     if (!dateStr) return false;
     const cleanDate = normalizeDate(dateStr);
-    const parts = cleanDate.split('-').map(Number); // [2024, 5, 20]
-    // FIX: Tambahkan jam 12:00:00 (Noon) untuk mencegah pergeseran tanggal akibat timezone
-    // new Date(Year, MonthIndex, Day, Hour, Minute, Second)
+    const parts = cleanDate.split('-').map(Number); 
+    // Fix: Use Noon to prevent timezone shift bugs
     const dateObj = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
     const day = dateObj.getDay();
-    return day === 0 || day === 6; // 0=Minggu, 6=Sabtu
+    return day === 0 || day === 6; 
   };
 
-  // 3. Cek Hari Libur dengan pencocokan String Exact
   const getHoliday = (dateStr: string) => {
     if (!dateStr) return undefined;
     const targetDate = normalizeDate(dateStr);
-    
     return holidays.find(h => {
         const holidayDate = normalizeDate(h.date);
         return holidayDate === targetDate;
     });
   };
 
-  // Status Hari Ini (Evaluasi setiap render)
   const currentHoliday = getHoliday(selectedDate);
   const isWeekendDay = isWeekend(selectedDate);
   const isDayOff = isWeekendDay || !!currentHoliday;
 
-  // SORTING: Sort by Class (if ALL) then Name Alphabetically
+  // --- FILTER & SORT ---
   const filteredStudents = students
     .filter(s => (selectedClass === 'ALL' ? true : s.classId === selectedClass) && s.isActive)
     .sort((a, b) => {
-      // Jika semua kelas, urutkan kelas dulu (Numeric sort)
       if (selectedClass === 'ALL') {
          const classCompare = a.classId.localeCompare(b.classId, undefined, { numeric: true });
          if (classCompare !== 0) return classCompare;
@@ -68,22 +61,34 @@ const AttendanceDaily: React.FC = () => {
       return a.name.localeCompare(b.name);
     });
 
+  // --- LOAD DATA AWAL ---
+  // Gunakan useEffect ini HANYA jika tanggal atau kelas berubah
+  // Jangan masukkan localAttendance ke dependency agar tidak infinite loop
   useEffect(() => {
     const existing: Record<string, AttendanceStatus> = {};
     
     filteredStudents.forEach(s => {
       const record = attendance.find(a => a.studentId === s.id && a.date === selectedDate);
-      existing[s.id] = record ? record.status : AttendanceStatus.NONE;
+      // Jika ada record di database, pakai itu. Jika tidak, biarkan undefined/kosong.
+      // Kita set ke NONE hanya jika record eksplisit NONE (biasanya tidak disimpan)
+      if (record) {
+         existing[s.id] = record.status;
+      } else {
+         existing[s.id] = AttendanceStatus.NONE;
+      }
     });
+
     setLocalAttendance(existing);
     setSentStatus({}); 
   }, [selectedDate, selectedClass, attendance, students]); 
 
+  // --- HANDLERS ---
+
   const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
-    // PROTEKSI LAPIS 1: Mencegah perubahan state jika hari libur
-    if (isDayOff) {
+    // Allow setting to NONE (Reset) even on holidays to fix mistakes
+    if (isDayOff && status !== AttendanceStatus.NONE) {
       const reason = currentHoliday ? `Libur Nasional (${currentHoliday.description})` : "Akhir Pekan";
-      alert(`⛔ AKSES DITOLAK\n\nTanggal ${selectedDate} adalah ${reason}.\nSistem mengunci pengisian absensi pada hari libur.`);
+      alert(`⛔ AKSES DITOLAK\n\nTanggal ${selectedDate} adalah ${reason}.`);
       return; 
     }
     setLocalAttendance(prev => ({ ...prev, [studentId]: status }));
@@ -92,76 +97,34 @@ const AttendanceDaily: React.FC = () => {
   const handleSave = () => {
     if (!activeYear) return alert("Pilih tahun pelajaran aktif di dashboard");
     
-    // PROTEKSI LAPIS 2: Mencegah penyimpanan
-    if (isDayOff) {
-      const msg = currentHoliday ? `Hari Libur Nasional: ${currentHoliday.description}` : "Akhir Pekan (Sabtu/Minggu)";
-      return alert(`⛔ TIDAK BISA MENYIMPAN\n\nTanggal: ${selectedDate}\nAlasan: ${msg}\n\nAnda tidak dapat menyimpan absensi pada hari libur.`);
-    }
-    
-    const records: AttendanceRecord[] = Object.entries(localAttendance)
-      .filter(([_, status]) => status !== AttendanceStatus.NONE)
-      .map(([studentId, status]) => ({
-        id: `${studentId}-${selectedDate}`,
-        studentId,
-        date: selectedDate,
-        status: status as AttendanceStatus,
-        academicYear: activeYear.name
-      }));
-    
-    markAttendance(records);
-    triggerSave(); 
-    alert('Data absensi berhasil disimpan dan sedang dikirim ke Spreadsheet...');
-  };
-
-  // --- LOGIKA IMPORT EXCEL ---
-  const handleImport = () => {
-    if (currentUser?.role !== UserRole.ADMIN) {
-      return alert("Akses Ditolak. Fitur ini hanya untuk Admin.");
-    }
-
-    if (isDayOff) {
-        return alert("⛔ IMPORT DITOLAK: Hari ini adalah hari libur.");
-    }
-
-    const lines = importText.trim().split(/\r?\n/);
-    let successCount = 0;
-    const newLocalAttendance = { ...localAttendance };
-
-    lines.forEach(line => {
-      const parts = line.split('\t');
-      if (parts.length >= 2) {
-        const key = parts[0].trim(); // Bisa NISN atau Nama
-        const statusRaw = parts[1].trim().toUpperCase();
-
-        const student = filteredStudents.find(s => 
-          s.nisn === key || s.name.toLowerCase() === key.toLowerCase()
-        );
-
-        if (student) {
-          let status: AttendanceStatus = AttendanceStatus.NONE;
-          if (['H', 'HADIR', 'PRESENT'].includes(statusRaw)) status = AttendanceStatus.HADIR;
-          else if (['S', 'SAKIT', 'SICK'].includes(statusRaw)) status = AttendanceStatus.SAKIT;
-          else if (['I', 'IZIN', 'PERMIT'].includes(statusRaw)) status = AttendanceStatus.IZIN;
-          else if (['A', 'ALPA', 'ABSENT'].includes(statusRaw)) status = AttendanceStatus.ALPA;
-
-          if (status !== AttendanceStatus.NONE) {
-            newLocalAttendance[student.id] = status;
-            successCount++;
-          }
-        }
-      }
+    const hasActiveAttendance = filteredStudents.some(s => {
+        const st = localAttendance[s.id];
+        return st && st !== AttendanceStatus.NONE;
     });
 
-    if (successCount > 0) {
-      setLocalAttendance(newLocalAttendance);
-      alert(`Berhasil membaca ${successCount} data absensi. Jangan lupa tekan tombol SIMPAN.`);
-      setImportText('');
-      setShowImport(false);
-    } else {
-      alert("Tidak ada data yang cocok. Pastikan format: [NISN/Nama] [Tab] [Status]");
+    if (isDayOff && hasActiveAttendance) {
+      const msg = currentHoliday ? `Hari Libur Nasional: ${currentHoliday.description}` : "Akhir Pekan";
+      return alert(`⛔ TIDAK BISA MENYIMPAN\n\nTanggal: ${selectedDate} adalah ${msg}.\nAnda hanya diperbolehkan melakukan RESET (Kosongkan) data.`);
     }
+    
+    const records: AttendanceRecord[] = [];
+    filteredStudents.forEach(s => {
+       const status = localAttendance[s.id] || AttendanceStatus.NONE;
+       records.push({
+          id: `${s.id}-${selectedDate}`,
+          studentId: s.id,
+          date: selectedDate,
+          status: status as AttendanceStatus,
+          academicYear: activeYear.name
+       });
+    });
+
+    markAttendance(records);
+    triggerSave(); 
+    alert('✅ Data Tersimpan! Sinkronisasi berjalan di latar belakang.');
   };
 
+  // --- UTILS LAINNYA ---
   const formatPhone = (phone: string | undefined) => {
     if (!phone) return '';
     let p = phone.replace(/\D/g, ''); 
@@ -230,19 +193,48 @@ const AttendanceDaily: React.FC = () => {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  const StatusButton = ({ sId, type, label, color }: any) => (
-    <button
-      onClick={() => handleStatusChange(sId, type)}
-      disabled={isDayOff} 
-      className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-        localAttendance[sId] === type 
-          ? `bg-${color}-600 text-white shadow-md` 
-          : `bg-gray-100 text-gray-500 hover:bg-${color}-50 hover:text-${color}-600`
-      } ${isDayOff ? 'opacity-20 cursor-not-allowed' : ''}`}
-    >
-      {label}
-    </button>
-  );
+  // Import Handler
+  const handleImport = () => {
+    if (currentUser?.role !== UserRole.ADMIN) return alert("Hanya Admin.");
+    if (isDayOff) return alert("Hari Libur.");
+
+    const lines = importText.trim().split(/\r?\n/);
+    let successCount = 0;
+    
+    setLocalAttendance(prev => {
+        const updates = { ...prev };
+        lines.forEach(line => {
+          const parts = line.split('\t');
+          if (parts.length >= 2) {
+            const key = parts[0].trim();
+            const statusRaw = parts[1].trim().toUpperCase();
+            const student = filteredStudents.find(s => s.nisn === key || s.name.toLowerCase() === key.toLowerCase());
+
+            if (student) {
+              let status: AttendanceStatus = AttendanceStatus.NONE;
+              if (['H', 'HADIR'].includes(statusRaw)) status = AttendanceStatus.HADIR;
+              else if (['S', 'SAKIT'].includes(statusRaw)) status = AttendanceStatus.SAKIT;
+              else if (['I', 'IZIN'].includes(statusRaw)) status = AttendanceStatus.IZIN;
+              else if (['A', 'ALPA'].includes(statusRaw)) status = AttendanceStatus.ALPA;
+
+              if (status !== AttendanceStatus.NONE) {
+                updates[student.id] = status;
+                successCount++;
+              }
+            }
+          }
+        });
+        return updates;
+    });
+
+    if (successCount > 0) {
+      alert(`Berhasil import ${successCount} data.`);
+      setImportText('');
+      setShowImport(false);
+    } else {
+      alert("Format salah atau data tidak cocok.");
+    }
+  };
 
   const absentStudents = filteredStudents.filter(s => {
     const status = localAttendance[s.id];
@@ -250,68 +242,71 @@ const AttendanceDaily: React.FC = () => {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
         <div>
           <h1 className="text-xl font-bold text-gray-800">Absensi Harian</h1>
-          <p className="text-sm text-gray-500">Isi kehadiran siswa & kirim notifikasi</p>
+          <p className="text-sm text-gray-500">Input kehadiran siswa</p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <input 
             type="date" 
             value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
             className={`border p-2 rounded-lg text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none ${isDayOff ? 'bg-red-50 border-red-300 text-red-700 font-bold' : ''}`}
           />
-          {currentUser?.role === UserRole.ADMIN && (
+          {currentUser?.role === UserRole.ADMIN ? (
              <div className="flex gap-2">
                 <select 
                   value={selectedClass} 
                   onChange={e => setSelectedClass(e.target.value)}
-                  className="border p-2 rounded-lg text-gray-700 bg-white"
+                  className="border p-2 rounded-lg text-gray-700 bg-white shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="ALL">Semua Kelas</option>
-                  {['1','2','3','4','5','6'].map(c => <option key={c} value={c}>Kelas {c}</option>)}
+                  {CLASS_LIST.map(c => <option key={c} value={c}>Kelas {c}</option>)}
                 </select>
                 <button 
                   onClick={() => setShowImport(true)}
                   disabled={isDayOff}
                   className={`flex items-center space-x-2 text-white px-3 py-2 rounded-lg shadow-sm ${isDayOff ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
-                  title={isDayOff ? "Tidak tersedia di hari libur" : "Import Excel"}
+                  title="Import Excel"
                 >
                   <Upload size={18} />
-                  <span className="hidden md:inline">Import</span>
                 </button>
+             </div>
+          ) : (
+             <div className="px-3 py-2 bg-blue-50 text-blue-700 font-bold rounded-lg border border-blue-100">
+                Kelas {selectedClass}
              </div>
           )}
         </div>
       </div>
 
+      {/* ALERT HARI LIBUR */}
       {isDayOff ? (
-        <div className="bg-red-50 border-2 border-red-200 p-10 rounded-xl flex flex-col items-center justify-center space-y-4 text-center animate-pulse">
-          <CalendarOff size={64} className="text-red-500" />
-          <div>
-            <h3 className="text-2xl font-bold text-red-700">TIDAK ADA ABSENSI</h3>
-            <p className="text-red-600 font-medium text-lg mt-2">
-              {currentHoliday ? `Libur Nasional: ${currentHoliday.description}` : "Hari Libur Akhir Pekan (Sabtu / Minggu)"}
-            </p>
-          </div>
-          <div className="bg-white px-6 py-3 rounded-lg border border-red-100 text-red-600 font-bold shadow-sm">
-             SISTEM DIKUNCI: Absensi tidak dapat diisi atau disimpan.
+        <div className="bg-red-50 border-2 border-red-200 p-8 rounded-xl flex flex-col items-center justify-center text-center">
+          <CalendarOff size={48} className="text-red-500 mb-2" />
+          <h3 className="text-xl font-bold text-red-700">HARI LIBUR / AKHIR PEKAN</h3>
+          <p className="text-red-600">
+            {currentHoliday ? currentHoliday.description : "Tidak ada jadwal sekolah hari ini."}
+          </p>
+          <div className="mt-4 px-4 py-2 bg-white border border-red-100 rounded text-red-500 text-sm font-bold">
+             ABSENSI DIKUNCI
           </div>
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
-              <thead className="bg-gray-50 text-gray-600 border-b">
+              <thead className="bg-gray-50 text-gray-600 border-b text-sm uppercase">
                 <tr>
                   <th className="p-4 w-10">No</th>
                   <th className="p-4">Nama Siswa</th>
                   {selectedClass === 'ALL' && <th className="p-4 text-center">Kelas</th>}
-                  <th className="p-4 text-center">Kehadiran</th>
-                  <th className="p-4 text-center">Notifikasi WA</th>
+                  <th className="p-4 text-center">Status Kehadiran</th>
+                  <th className="p-4 text-center w-24">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -319,8 +314,8 @@ const AttendanceDaily: React.FC = () => {
                   <tr key={s.id} className="hover:bg-gray-50">
                     <td className="p-4 text-gray-500">{idx + 1}</td>
                     <td className="p-4">
-                      <div className="font-medium text-gray-800">{s.name}</div>
-                      <div className="text-xs text-gray-500">{s.nisn}</div>
+                      <div className="font-bold text-gray-800">{s.name}</div>
+                      <div className="text-xs text-gray-500 font-mono">{s.nisn}</div>
                     </td>
                     {selectedClass === 'ALL' && (
                        <td className="p-4 text-center">
@@ -330,26 +325,57 @@ const AttendanceDaily: React.FC = () => {
                        </td>
                     )}
                     <td className="p-4">
-                      <div className="flex justify-center space-x-2">
-                        <StatusButton sId={s.id} type={AttendanceStatus.HADIR} label="H" color="green" />
-                        <StatusButton sId={s.id} type={AttendanceStatus.SAKIT} label="S" color="yellow" />
-                        <StatusButton sId={s.id} type={AttendanceStatus.IZIN} label="I" color="blue" />
-                        <StatusButton sId={s.id} type={AttendanceStatus.ALPA} label="A" color="red" />
+                      <div className="flex justify-center items-center gap-2">
+                        {/* BUTTONS */}
+                        {[
+                          { type: AttendanceStatus.HADIR, label: 'H', color: 'green' },
+                          { type: AttendanceStatus.SAKIT, label: 'S', color: 'yellow' },
+                          { type: AttendanceStatus.IZIN, label: 'I', color: 'blue' },
+                          { type: AttendanceStatus.ALPA, label: 'A', color: 'red' },
+                        ].map(btn => (
+                           <button
+                             key={btn.type}
+                             onClick={() => handleStatusChange(s.id, btn.type as AttendanceStatus)}
+                             disabled={isDayOff} 
+                             className={`w-8 h-8 flex items-center justify-center text-sm font-bold rounded-md transition-all ${
+                               localAttendance[s.id] === btn.type 
+                                 ? `bg-${btn.color}-600 text-white shadow-md scale-110 ring-2 ring-${btn.color}-200` 
+                                 : `bg-gray-100 text-gray-400 hover:bg-${btn.color}-50 hover:text-${btn.color}-600`
+                             } ${isDayOff ? 'opacity-30 cursor-not-allowed' : ''}`}
+                           >
+                             {btn.label}
+                           </button>
+                        ))}
+
+                        <div className="w-px h-6 bg-gray-300 mx-2"></div>
+
+                        {/* TOMBOL RESET PER SISWA */}
+                        <button
+                          onClick={() => handleStatusChange(s.id, AttendanceStatus.NONE)}
+                          title="Batalkan / Hapus Absensi"
+                          className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors ${
+                             localAttendance[s.id] === AttendanceStatus.NONE || !localAttendance[s.id]
+                               ? 'text-gray-300 cursor-default'
+                               : 'bg-red-50 text-red-500 hover:bg-red-100 cursor-pointer shadow-sm'
+                          }`}
+                        >
+                          <RotateCcw size={16} />
+                        </button>
                       </div>
                     </td>
                     <td className="p-4 text-center">
                       {localAttendance[s.id] && localAttendance[s.id] !== AttendanceStatus.NONE && (
                         <button 
                           onClick={() => sendWhatsApp(s)}
-                          className={`p-2 rounded-full transition-colors flex items-center justify-center mx-auto ${
+                          className={`p-2 rounded-full transition-colors ${
                             sentStatus[s.id] 
-                              ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
-                              : !s.parentPhone 
-                                ? 'text-gray-300 cursor-not-allowed' 
-                                : 'text-green-600 hover:bg-green-100 bg-green-50'
+                              ? 'bg-gray-100 text-gray-400' 
+                              : s.parentPhone 
+                                ? 'bg-green-50 text-green-600 hover:bg-green-100' 
+                                : 'bg-gray-50 text-gray-300 cursor-not-allowed'
                           }`}
-                          title={s.parentPhone ? "Kirim WA ke Orang Tua" : "No. WA Tidak Tersedia"}
                           disabled={!s.parentPhone}
+                          title={s.parentPhone ? "Kirim WA" : "No WA Kosong"}
                         >
                           {sentStatus[s.id] ? <CheckCircle size={18} /> : <MessageCircle size={18} />}
                         </button>
@@ -361,65 +387,58 @@ const AttendanceDaily: React.FC = () => {
             </table>
           </div>
           
-          <div className="p-4 border-t bg-gray-50 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="flex gap-2 w-full justify-end">
-               <button 
-                  onClick={() => setShowBulkModal(true)}
-                  className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 shadow-md flex items-center gap-2"
-                  disabled={absentStudents.length === 0}
-                >
-                  <Send size={18} /> Notifikasi ({absentStudents.length})
-                </button>
-               <button 
-                  onClick={handleRecapWhatsApp}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 shadow-md flex items-center gap-2"
-                >
-                  <Share2 size={18} /> Rekap Grup
-                </button>
-                <button 
-                  onClick={handleSave}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 shadow-md flex items-center gap-2"
-                >
-                  <Save size={18} /> Simpan Absensi
-                </button>
+          {/* TOOLBAR BAWAH */}
+          <div className="p-4 border-t bg-gray-50 sticky bottom-0 z-10 flex flex-col xl:flex-row justify-between items-center gap-4 shadow-inner">
+             
+            <div className="flex flex-wrap gap-2 w-full justify-end">
+               
+               {/* GROUP: ACTIONS */}
+               <div className="flex gap-2">
+                 <button 
+                    onClick={() => setShowBulkModal(true)}
+                    className="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 shadow-md flex items-center gap-2"
+                    disabled={absentStudents.length === 0}
+                  >
+                    <Send size={18} /> <span className="hidden sm:inline">Notifikasi ({absentStudents.length})</span>
+                  </button>
+                 <button 
+                    onClick={handleRecapWhatsApp}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 shadow-md flex items-center gap-2"
+                  >
+                    <Share2 size={18} /> <span className="hidden sm:inline">Rekap</span>
+                  </button>
+                  <button 
+                    onClick={handleSave}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 shadow-lg shadow-blue-500/30 flex items-center gap-2 font-bold animate-pulse-once"
+                  >
+                    <Save size={18} /> SIMPAN
+                  </button>
+               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Bulk Send Modal */}
+      {/* MODAL & IMPORT */}
       {showBulkModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 flex flex-col max-h-[80vh]">
             <div className="flex justify-between items-center mb-4 border-b pb-2">
               <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                <Smartphone className="text-orange-500" />
-                Asisten Notifikasi WA
+                <Smartphone className="text-orange-500" /> Asisten Notifikasi
               </h3>
-              <button onClick={() => setShowBulkModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
+              <button onClick={() => setShowBulkModal(false)}><X size={20}/></button>
             </div>
-            
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {absentStudents.map((s, idx) => (
                   <div key={s.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
-                    <div className="flex items-center gap-3">
-                       <span className="text-sm font-mono text-gray-400 w-6">{idx+1}.</span>
-                       <div>
-                         <p className="font-bold text-gray-800">
-                             {s.name} <span className="text-xs text-gray-400 font-normal">(Kelas {s.classId})</span>
-                         </p>
+                    <div>
+                         <p className="font-bold text-gray-800">{s.name}</p>
                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold">
                            {localAttendance[s.id] === 'S' ? 'Sakit' : localAttendance[s.id] === 'I' ? 'Izin' : 'Alpa'}
                          </span>
-                       </div>
                     </div>
-                    <button 
-                      onClick={() => sendWhatsApp(s)}
-                      disabled={!s.parentPhone}
-                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium ${sentStatus[s.id] ? 'bg-gray-100 text-gray-500' : 'bg-green-600 text-white'}`}
-                    >
-                      {sentStatus[s.id] ? 'Terkirim' : 'Kirim WA'}
-                    </button>
+                    <button onClick={() => sendWhatsApp(s)} className="bg-green-600 text-white px-3 py-1 rounded text-xs">Kirim WA</button>
                   </div>
               ))}
             </div>
@@ -427,23 +446,16 @@ const AttendanceDaily: React.FC = () => {
         </div>
       )}
 
-      {/* IMPORT EXCEL MODAL */}
+      {/* Import Modal */}
       {showImport && currentUser?.role === UserRole.ADMIN && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
-            <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <Upload className="text-green-600" /> Import Absensi (Copy-Paste)
-            </h3>
-            <textarea 
-              className="w-full h-40 border p-3 rounded-lg text-sm font-mono focus:ring-2 focus:ring-green-500 outline-none resize-none" 
-              placeholder={"0012345678\tS\nBudi Santoso\tI\n..."}
-              value={importText}
-              onChange={e => setImportText(e.target.value)}
-            />
-            <div className="flex justify-end gap-3 mt-4">
-               <button onClick={() => setShowImport(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Batal</button>
-               <button onClick={handleImport} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Proses Input</button>
-            </div>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-lg p-6">
+             <h3 className="font-bold text-lg mb-2">Import Absensi</h3>
+             <textarea value={importText} onChange={e => setImportText(e.target.value)} className="w-full h-32 border p-2" placeholder="Paste data excel..." />
+             <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setShowImport(false)} className="px-4 py-2 text-gray-600">Batal</button>
+                <button onClick={handleImport} className="px-4 py-2 bg-green-600 text-white rounded">Proses</button>
+             </div>
           </div>
         </div>
       )}

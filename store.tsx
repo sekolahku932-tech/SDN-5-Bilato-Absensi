@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   AppState, Student, Teacher, AttendanceRecord, AcademicYear, 
-  Holiday, Headmaster, UserRole, Alumni, AlumniReason 
+  Holiday, Headmaster, UserRole, Alumni, AlumniReason, AttendanceStatus 
 } from './types';
 import { 
   INITIAL_STUDENTS, INITIAL_TEACHERS, INITIAL_YEARS, 
@@ -199,8 +199,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markAttendance = (records: AttendanceRecord[]) => {
     setAttendance(prev => {
+      // 1. Remove ANY existing record matching student+date (Effective Delete)
+      // This allows "Reset" functionality (sending NONE status deletes the record)
       const filtered = prev.filter(p => !records.some(r => r.studentId === p.studentId && r.date === p.date));
-      return [...filtered, ...records];
+      
+      // 2. Add new records ONLY if status is NOT NONE (Effective Insert)
+      const validRecords = records.filter(r => r.status !== AttendanceStatus.NONE);
+      
+      return [...filtered, ...validRecords];
     });
   };
 
