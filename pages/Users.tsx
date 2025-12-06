@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useApp } from '../store';
 import { Teacher } from '../types';
@@ -5,7 +6,7 @@ import { Plus, Edit, Key, Trash2, Search, X, Upload, User } from 'lucide-react';
 import { CLASS_LIST } from '../constants';
 
 const Users: React.FC = () => {
-  const { teachers, addTeacher, updateTeacher, deleteTeacher } = useApp();
+  const { teachers, addTeacher, updateTeacher, deleteTeacher, triggerSave } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
@@ -36,6 +37,7 @@ const Users: React.FC = () => {
     } else {
       addTeacher({ ...formData, id: Date.now().toString() });
     }
+    triggerSave(); // MEMASTIKAN DATA TERSIMPAN KE SPREADSHEET
     setShowModal(false);
     setFormData(initialForm);
   };
@@ -47,7 +49,10 @@ const Users: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    if(window.confirm('Hapus user ini?')) deleteTeacher(id);
+    if(window.confirm('Hapus user ini?')) {
+        deleteTeacher(id);
+        triggerSave(); // MEMASTIKAN PENGHAPUSAN TERSIMPAN
+    }
   };
 
   const handleImport = () => {
@@ -68,9 +73,15 @@ const Users: React.FC = () => {
         count++;
       }
     });
-    alert(`Imported ${count} users.`);
-    setImportText('');
-    setShowImport(false);
+    
+    if (count > 0) {
+        triggerSave(); // MEMASTIKAN IMPORT TERSIMPAN
+        alert(`Berhasil import ${count} user.`);
+        setImportText('');
+        setShowImport(false);
+    } else {
+        alert("Gagal import. Pastikan format sesuai.");
+    }
   };
 
   return (

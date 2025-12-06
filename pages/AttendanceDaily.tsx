@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../store';
 import { UserRole, AttendanceStatus, AttendanceRecord, Student } from '../types';
-import { Save, MessageCircle, AlertCircle, Share2, Send, X, CheckCircle, Smartphone, CalendarOff, Upload } from 'lucide-react';
+import { Save, MessageCircle, Share2, Send, X, CheckCircle, Smartphone, CalendarOff, Upload } from 'lucide-react';
 
 const AttendanceDaily: React.FC = () => {
   const { students, attendance, holidays, markAttendance, currentUser, academicYears, triggerSave } = useApp();
@@ -56,13 +56,17 @@ const AttendanceDaily: React.FC = () => {
   const isWeekendDay = isWeekend(selectedDate);
   const isDayOff = isWeekendDay || !!currentHoliday;
 
-  // Debugging Logika (Hanya muncul di console jika ada masalah)
-  // console.log(`Date: ${selectedDate}, IsWeekend: ${isWeekendDay}, Holiday:`, currentHoliday);
-
-  // SORTING: Sort by Name Alphabetically
+  // SORTING: Sort by Class (if ALL) then Name Alphabetically
   const filteredStudents = students
-    .filter(s => s.classId === selectedClass && s.isActive)
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(s => (selectedClass === 'ALL' ? true : s.classId === selectedClass) && s.isActive)
+    .sort((a, b) => {
+      // Jika semua kelas, urutkan kelas dulu (Numeric sort)
+      if (selectedClass === 'ALL') {
+         const classCompare = a.classId.localeCompare(b.classId, undefined, { numeric: true });
+         if (classCompare !== 0) return classCompare;
+      }
+      return a.name.localeCompare(b.name);
+    });
 
   useEffect(() => {
     const existing: Record<string, AttendanceStatus> = {};
@@ -198,24 +202,25 @@ const AttendanceDaily: React.FC = () => {
     const hCount = filteredStudents.filter(st => localAttendance[st.id] === AttendanceStatus.HADIR).length;
     
     const dateFormatted = new Date(selectedDate).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const titleClass = selectedClass === 'ALL' ? 'SEMUA KELAS' : `KELAS ${selectedClass}`;
 
-    let text = `*LAPORAN ABSENSI KELAS ${selectedClass}*\n`;
+    let text = `*LAPORAN ABSENSI ${titleClass}*\n`;
     text += `${dateFormatted}\n`;
     text += `--------------------------------\n`;
 
     if (sList.length > 0) {
       text += `*😷 SAKIT:*\n`;
-      sList.forEach((st, idx) => text += `${idx + 1}. ${st.name}\n`);
+      sList.forEach((st, idx) => text += `${idx + 1}. ${st.name} (${st.classId})\n`);
       text += `\n`;
     }
     if (iList.length > 0) {
       text += `*📩 IZIN:*\n`;
-      iList.forEach((st, idx) => text += `${idx + 1}. ${st.name}\n`);
+      iList.forEach((st, idx) => text += `${idx + 1}. ${st.name} (${st.classId})\n`);
       text += `\n`;
     }
     if (aList.length > 0) {
       text += `*❌ ALPA:*\n`;
-      aList.forEach((st, idx) => text += `${idx + 1}. ${st.name}\n`);
+      aList.forEach((st, idx) => text += `${idx + 1}. ${st.name} (${st.classId})\n`);
       text += `\n`;
     }
     text += `✅ Hadir: ${hCount} Siswa\n`;
@@ -266,6 +271,7 @@ const AttendanceDaily: React.FC = () => {
                   onChange={e => setSelectedClass(e.target.value)}
                   className="border p-2 rounded-lg text-gray-700 bg-white"
                 >
+                  <option value="ALL">Semua Kelas</option>
                   {['1','2','3','4','5','6'].map(c => <option key={c} value={c}>Kelas {c}</option>)}
                 </select>
                 <button 
@@ -303,6 +309,7 @@ const AttendanceDaily: React.FC = () => {
                 <tr>
                   <th className="p-4 w-10">No</th>
                   <th className="p-4">Nama Siswa</th>
+                  {selectedClass === 'ALL' && <th className="p-4 text-center">Kelas</th>}
                   <th className="p-4 text-center">Kehadiran</th>
                   <th className="p-4 text-center">Notifikasi WA</th>
                 </tr>
@@ -315,6 +322,13 @@ const AttendanceDaily: React.FC = () => {
                       <div className="font-medium text-gray-800">{s.name}</div>
                       <div className="text-xs text-gray-500">{s.nisn}</div>
                     </td>
+                    {selectedClass === 'ALL' && (
+                       <td className="p-4 text-center">
+                          <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
+                             {s.classId}
+                          </span>
+                       </td>
+                    )}
                     <td className="p-4">
                       <div className="flex justify-center space-x-2">
                         <StatusButton sId={s.id} type={AttendanceStatus.HADIR} label="H" color="green" />
@@ -391,7 +405,9 @@ const AttendanceDaily: React.FC = () => {
                     <div className="flex items-center gap-3">
                        <span className="text-sm font-mono text-gray-400 w-6">{idx+1}.</span>
                        <div>
-                         <p className="font-bold text-gray-800">{s.name}</p>
+                         <p className="font-bold text-gray-800">
+                             {s.name} <span className="text-xs text-gray-400 font-normal">(Kelas {s.classId})</span>
+                         </p>
                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-bold">
                            {localAttendance[s.id] === 'S' ? 'Sakit' : localAttendance[s.id] === 'I' ? 'Izin' : 'Alpa'}
                          </span>
