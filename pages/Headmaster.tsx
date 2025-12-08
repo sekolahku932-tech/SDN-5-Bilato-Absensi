@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../store';
-import { User, Save } from 'lucide-react';
+import { User, Save, RotateCcw } from 'lucide-react';
+import { INITIAL_HEADMASTER } from '../constants';
 
 const Headmaster: React.FC = () => {
   const { headmaster, updateHeadmaster, triggerSave } = useApp();
@@ -18,6 +19,13 @@ const Headmaster: React.FC = () => {
     updateHeadmaster({ name, nip });
     triggerSave();
     alert("Data Kepala Sekolah berhasil diperbarui.");
+  };
+
+  const handleReset = () => {
+    if (window.confirm("Kembalikan data kepala sekolah ke default sistem (bawaan)?")) {
+      updateHeadmaster(INITIAL_HEADMASTER);
+      triggerSave();
+    }
   };
 
   return (
@@ -59,12 +67,23 @@ const Headmaster: React.FC = () => {
               placeholder="19xxxxxxxx xxx x xxx"
             />
           </div>
-          <button 
-            type="submit" 
-            className="w-full bg-blue-600 text-white py-3 rounded-xl font-medium hover:bg-blue-700 shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-transform hover:scale-[1.02]"
-          >
-            <Save size={20} /> Simpan Perubahan
-          </button>
+          
+          <div className="flex gap-3 pt-2">
+            <button 
+                type="button"
+                onClick={handleReset}
+                className="flex-1 bg-gray-100 text-gray-600 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                title="Kembalikan nama kepala sekolah bawaan"
+             >
+                <RotateCcw size={20} /> Reset Default
+             </button>
+            <button 
+              type="submit" 
+              className="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-medium hover:bg-blue-700 shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-transform hover:scale-[1.02]"
+            >
+              <Save size={20} /> Simpan Perubahan
+            </button>
+          </div>
         </form>
       </div>
     </div>

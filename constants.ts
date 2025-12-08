@@ -1,5 +1,6 @@
 
-import { AcademicYear, Headmaster, Student, Teacher, Holiday } from './types';
+
+import { AcademicYear, Headmaster, Student, Teacher, Holiday, Subject } from './types';
 
 // URL Script yang sudah di-hardcode agar langsung terhubung
 export const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyQqeFCj9CRsKL7bK9JmPkQxy9CUxPks11pRGzTb0CRglXyUIMWJQrnn4lXjTCz3dUBbw/exec';
@@ -35,4 +36,7 @@ export const INITIAL_HOLIDAYS: Holiday[] = [
   { id: 'h2', date: '2024-08-17', description: 'Kemerdekaan RI' },
 ];
 
+export const INITIAL_SUBJECTS: Subject[] = [];
+
 export const CLASS_LIST = ['1', '2', '3', '4', '5', '6'];
+export const DAYS_OF_WEEK = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];

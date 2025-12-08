@@ -2,11 +2,12 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   AppState, Student, Teacher, AttendanceRecord, AcademicYear, 
-  Holiday, Headmaster, UserRole, Alumni, AlumniReason, AttendanceStatus 
+  Holiday, Headmaster, UserRole, Alumni, AlumniReason, AttendanceStatus,
+  Subject, SubjectAttendanceRecord
 } from './types';
 import { 
   INITIAL_STUDENTS, INITIAL_TEACHERS, INITIAL_YEARS, 
-  INITIAL_HOLIDAYS, INITIAL_HEADMASTER, DEFAULT_SCRIPT_URL
+  INITIAL_HOLIDAYS, INITIAL_HEADMASTER, DEFAULT_SCRIPT_URL, INITIAL_SUBJECTS
 } from './constants';
 
 interface AppContextType extends AppState {
@@ -28,6 +29,12 @@ interface AppContextType extends AppState {
   toggleHoliday: (h: Holiday) => void;
   deleteHoliday: (id: string) => void;
   
+  // Subject Actions
+  addSubject: (s: Subject) => void;
+  updateSubject: (s: Subject) => void; // Added update capability
+  deleteSubject: (id: string) => void;
+  markSubjectAttendance: (records: SubjectAttendanceRecord[]) => void;
+  
   // Sync
   setGoogleScriptUrl: (url: string) => void;
   syncToCloud: (silent?: boolean) => Promise<boolean>;
@@ -45,6 +52,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [holidays, setHolidays] = useState<Holiday[]>(INITIAL_HOLIDAYS);
   const [alumni, setAlumni] = useState<Alumni[]>([]);
   const [headmaster, setHeadmaster] = useState<Headmaster>(INITIAL_HEADMASTER);
+  
+  // New States for Subjects
+  const [subjects, setSubjects] = useState<Subject[]>(INITIAL_SUBJECTS);
+  const [subjectAttendance, setSubjectAttendance] = useState<SubjectAttendanceRecord[]>([]);
+
   const [currentUser, setCurrentUser] = useState<AppState['currentUser']>(null);
   
   const [googleScriptUrl, setGoogleScriptUrl] = useState<string>(DEFAULT_SCRIPT_URL);
@@ -56,7 +68,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Refs for Sync to access latest state inside async functions
   const stateRef = useRef({
-    students, teachers, attendance, alumni, academicYears, holidays, headmaster, googleScriptUrl
+    students, teachers, attendance, alumni, academicYears, holidays, headmaster, 
+    subjects, subjectAttendance, googleScriptUrl
   });
 
   // --- SYNC LOGIC DEFINITION (Moved up to be used in effect) ---
@@ -66,16 +79,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     setIsSyncing(true);
     try {
+      // PREPARE DATA FOR SHEET (Flatten Arrays/Objects)
+      const teachersForSheet = stateRef.current.teachers.map(t => ({
+        ...t,
+        // Convert Array to String "1,2,3" for Spreadsheet storage
+        accessibleClassIds: t.accessibleClassIds ? t.accessibleClassIds.join(',') : '',
+        subjectIds: t.subjectIds ? t.subjectIds.join(',') : ''
+      }));
+
       const payload = {
         action: 'write',
         data: {
           Students: stateRef.current.students,
-          Teachers: stateRef.current.teachers,
+          Teachers: teachersForSheet,
           Attendance: stateRef.current.attendance,
           Alumni: stateRef.current.alumni,
           Holidays: stateRef.current.holidays,
           AcademicYears: stateRef.current.academicYears,
-          Headmaster: [stateRef.current.headmaster] 
+          Headmaster: [stateRef.current.headmaster],
+          Subjects: stateRef.current.subjects,
+          SubjectAttendance: stateRef.current.subjectAttendance
         }
       };
 
@@ -105,13 +128,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Update Ref and Trigger Sync if Pending
   useEffect(() => {
-    stateRef.current = { students, teachers, attendance, alumni, academicYears, holidays, headmaster, googleScriptUrl };
+    stateRef.current = { 
+      students, teachers, attendance, alumni, academicYears, holidays, headmaster, 
+      subjects, subjectAttendance, googleScriptUrl 
+    };
     
     if (pendingSave) {
       syncToCloud(true);
       setPendingSave(false);
     }
-  }, [students, teachers, attendance, alumni, academicYears, holidays, headmaster, googleScriptUrl, pendingSave]);
+  }, [students, teachers, attendance, alumni, academicYears, holidays, headmaster, subjects, subjectAttendance, googleScriptUrl, pendingSave]);
 
   // --- INITIALIZATION LOGIC ---
   useEffect(() => {
@@ -128,6 +154,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (parsed.academicYears) setAcademicYears(parsed.academicYears);
           if (parsed.holidays) setHolidays(parsed.holidays);
           if (parsed.headmaster) setHeadmaster(parsed.headmaster);
+          if (parsed.subjects) setSubjects(parsed.subjects);
+          if (parsed.subjectAttendance) setSubjectAttendance(parsed.subjectAttendance);
           if (parsed.googleScriptUrl) setGoogleScriptUrl(parsed.googleScriptUrl);
           if (parsed.lastSync) setLastSync(parsed.lastSync);
         } catch (e) { console.error("Failed to load local data", e); }
@@ -153,15 +181,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Save to Local Storage on every change
   useEffect(() => {
     localStorage.setItem('absensi_app_data', JSON.stringify({ 
-      students, teachers, attendance, alumni, academicYears, holidays, headmaster, googleScriptUrl, lastSync
+      students, teachers, attendance, alumni, academicYears, holidays, headmaster, 
+      subjects, subjectAttendance, googleScriptUrl, lastSync
     }));
-  }, [students, teachers, attendance, alumni, academicYears, holidays, headmaster, googleScriptUrl, lastSync]);
+  }, [students, teachers, attendance, alumni, academicYears, holidays, headmaster, subjects, subjectAttendance, googleScriptUrl, lastSync]);
 
   const login = (role: UserRole, data?: any) => {
     if (role === UserRole.ADMIN) {
       setCurrentUser({ role, name: 'Administrator' });
     } else if (role === UserRole.WALI_KELAS) {
-      setCurrentUser({ role, id: data.id, name: data.name, classId: data.classId });
+      setCurrentUser({ 
+        role, 
+        id: data.id, 
+        name: data.name, 
+        classId: data.classId,
+        accessibleClassIds: data.accessibleClassIds,
+        subjectIds: data.subjectIds 
+      });
     } else if (role === UserRole.ORANG_TUA) {
       setCurrentUser({ role, name: 'Orang Tua Siswa', id: data.nisn }); 
     }
@@ -200,13 +236,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const markAttendance = (records: AttendanceRecord[]) => {
     setAttendance(prev => {
       // 1. Remove ANY existing record matching student+date (Effective Delete)
-      // This allows "Reset" functionality (sending NONE status deletes the record)
       const filtered = prev.filter(p => !records.some(r => r.studentId === p.studentId && r.date === p.date));
-      
       // 2. Add new records ONLY if status is NOT NONE (Effective Insert)
       const validRecords = records.filter(r => r.status !== AttendanceStatus.NONE);
-      
       return [...filtered, ...validRecords];
+    });
+  };
+
+  // SUBJECT ACTIONS
+  const addSubject = (s: Subject) => setSubjects(prev => [...prev, s]);
+  const updateSubject = (s: Subject) => setSubjects(prev => prev.map(sub => sub.id === s.id ? s : sub));
+  const deleteSubject = (id: string) => setSubjects(prev => prev.filter(s => s.id !== id));
+  
+  const markSubjectAttendance = (records: SubjectAttendanceRecord[]) => {
+    setSubjectAttendance(prev => {
+        const filtered = prev.filter(p => !records.some(r => 
+            r.studentId === p.studentId && 
+            r.date === p.date && 
+            r.subjectId === p.subjectId
+        ));
+        const validRecords = records.filter(r => r.status !== AttendanceStatus.NONE);
+        return [...filtered, ...validRecords];
     });
   };
 
@@ -241,18 +291,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const data = await response.json();
     
     // --- DATE SANITIZER FUNCTION ---
-    // Fixes the "Day before" bug caused by Timezone differences (UTC vs Local)
     const sanitizeDate = (dateVal: any) => {
       if (!dateVal) return '';
       const s = String(dateVal);
-      // If it looks like ISO Z format (UTC from Spreadsheet) e.g. 2024-05-24T17:00:00.000Z
       if (s.includes('T') && s.includes('Z')) {
          const d = new Date(s);
-         // Add 12 hours to shift from "Yesterday Afternoon UTC" to "Today Morning Local"
          d.setTime(d.getTime() + (12 * 60 * 60 * 1000));
          return d.toISOString().split('T')[0];
       }
-      // If it's already YYYY-MM-DD
       return s.split('T')[0];
     };
     
@@ -261,32 +307,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setStudents(data.Students.map((s: any) => ({...s, classId: String(s.classId), nisn: String(s.nisn)})));
       }
       if (data.Teachers && Array.isArray(data.Teachers)) {
-        setTeachers(data.Teachers.map((t: any) => ({...t, classId: t.classId ? String(t.classId) : ''})));
+        setTeachers(data.Teachers.map((t: any) => ({
+           ...t, 
+           classId: t.classId ? String(t.classId) : '',
+           // Deserialize string "1,2,3" back to array ['1','2','3']
+           accessibleClassIds: t.accessibleClassIds ? String(t.accessibleClassIds).split(',') : [],
+           subjectIds: t.subjectIds ? String(t.subjectIds).split(',') : []
+        })));
       }
       
       // Apply Date Sanitizer to date-sensitive fields
       if (data.Attendance && Array.isArray(data.Attendance)) {
-        setAttendance(data.Attendance.map((a: any) => ({
-            ...a,
-            date: sanitizeDate(a.date)
-        })));
+        setAttendance(data.Attendance.map((a: any) => ({ ...a, date: sanitizeDate(a.date) })));
       }
       if (data.Holidays && Array.isArray(data.Holidays)) {
-         setHolidays(data.Holidays.map((h: any) => ({
-             ...h,
-             date: sanitizeDate(h.date)
-         })));
+         setHolidays(data.Holidays.map((h: any) => ({ ...h, date: sanitizeDate(h.date) })));
       }
       if (data.Alumni && Array.isArray(data.Alumni)) {
-         setAlumni(data.Alumni.map((a: any) => ({
-             ...a,
-             dateLeft: sanitizeDate(a.dateLeft)
-         })));
+         setAlumni(data.Alumni.map((a: any) => ({ ...a, dateLeft: sanitizeDate(a.dateLeft) })));
       }
 
       if (data.AcademicYears && Array.isArray(data.AcademicYears)) setAcademicYears(data.AcademicYears);
       if (data.Headmaster && Array.isArray(data.Headmaster) && data.Headmaster[0]) setHeadmaster(data.Headmaster[0]);
-      
+
+      // --- SAFETY CHECK FOR SUBJECTS ---
+      // Only overwrite local subjects if cloud has data, or if local is empty.
+      // This prevents empty cloud data from wiping local work on refresh.
+      if (data.Subjects && Array.isArray(data.Subjects)) {
+          const localCount = stateRef.current.subjects.length;
+          const cloudCount = data.Subjects.length;
+          if (cloudCount > 0 || localCount === 0) {
+              setSubjects(data.Subjects);
+          }
+      }
+
+      // --- SAFETY CHECK FOR SUBJECT ATTENDANCE ---
+      if (data.SubjectAttendance && Array.isArray(data.SubjectAttendance)) {
+          const localCount = stateRef.current.subjectAttendance.length;
+          const cloudCount = data.SubjectAttendance.length;
+          if (cloudCount > 0 || localCount === 0) {
+              setSubjectAttendance(data.SubjectAttendance.map((a: any) => ({ ...a, date: sanitizeDate(a.date) })));
+          }
+      }
+
       const now = new Date().toLocaleString();
       setLastSync(now);
       return true;
@@ -311,10 +374,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       students, teachers, attendance, academicYears, holidays, headmaster, currentUser, alumni,
+      subjects, subjectAttendance,
       googleScriptUrl, lastSync, isSyncing,
       login, logout, addStudent, updateStudent, deleteStudent, promoteStudent, moveToAlumni,
       markAttendance, updateHeadmaster, addTeacher, updateTeacher, deleteTeacher,
       setAcademicYear, addAcademicYear, deleteAcademicYear, toggleHoliday, deleteHoliday,
+      addSubject, updateSubject, deleteSubject, markSubjectAttendance,
       setGoogleScriptUrl, syncToCloud, syncFromCloud, triggerSave
     }}>
       {children}

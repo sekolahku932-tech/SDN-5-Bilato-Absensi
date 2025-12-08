@@ -1,152 +1,182 @@
-import React, { useState, useEffect } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
-import { User, Role } from '../types';
+
+import React, { useState } from 'react';
+import { useApp } from '../store';
+import { UserRole } from '../types';
+import { DEFAULT_LOGO_URL } from '../constants';
 import { 
-  Users, BookOpen, UserCheck, FileText, Settings, 
-  LogOut, Home, GraduationCap, ClipboardList, Menu, X
+  LayoutDashboard, Users, UserCheck, Calendar, GraduationCap, 
+  Settings, LogOut, Menu, X, FileText, UserCog, Cloud, RefreshCw, Clock, Database, School, BookOpen, ClipboardList, Printer
 } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 
-interface LayoutProps {
-  children: React.ReactNode;
-  user: User;
-  onLogout: () => void;
-}
-
-const Layout: React.FC<LayoutProps> = ({ children, user, onLogout }) => {
+const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { currentUser, logout, academicYears, isSyncing, lastSync } = useApp();
+  const [isOpen, setIsOpen] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Tutup sidebar otomatis saat pindah halaman (UX Mobile)
-  useEffect(() => {
-    setIsSidebarOpen(false);
-  }, [location]);
+  const activeYear = academicYears.find(y => y.isActive)?.name || "N/A";
 
-  const isActive = (path: string) => location.pathname === path;
+  const MenuItem = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => (
+    <Link 
+      to={to} 
+      onClick={() => setIsOpen(false)}
+      className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+        location.pathname === to ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-blue-50'
+      }`}
+    >
+      <Icon size={20} />
+      <span>{label}</span>
+    </Link>
+  );
 
-  const getMenuItems = () => {
-    const items = [];
-    
-    // Dashboard common for all logged in
-    items.push({ icon: Home, label: 'Dashboard', path: '/app/dashboard' });
+  if (!currentUser) return <>{children}</>;
 
-    if (user.role === Role.ADMIN) {
-      items.push({ icon: Users, label: 'Daftar Siswa', path: '/app/students' });
-      items.push({ icon: BookOpen, label: 'Bahan Bacaan', path: '/app/materials' });
-      items.push({ icon: ClipboardList, label: 'Periksa Hasil', path: '/app/grading' });
-      items.push({ icon: UserCheck, label: 'Manajemen User', path: '/app/users' });
-      items.push({ icon: Settings, label: 'Pengaturan', path: '/app/settings' });
-    } else if (user.role === Role.TEACHER) {
-      items.push({ icon: Users, label: `Siswa Kelas ${user.classGrade}`, path: '/app/students' });
-      items.push({ icon: BookOpen, label: 'Input Bacaan', path: '/app/materials' });
-      items.push({ icon: ClipboardList, label: 'Periksa Refleksi', path: '/app/grading' });
-    } else if (user.role === Role.STUDENT) {
-      items.push({ icon: BookOpen, label: 'Bacaan Saya', path: '/app/read' });
-    }
-
-    return items;
-  };
+  const isParent = currentUser.role === UserRole.ORANG_TUA;
+  const isAdmin = currentUser.role === UserRole.ADMIN;
+  
+  // Definisi Guru
+  const isTeacher = currentUser.role === UserRole.WALI_KELAS;
+  // Guru Mapel tidak punya classId, Wali Kelas punya classId
+  const isHomeroom = isTeacher && Boolean(currentUser.classId);
+  // Definisi Guru Mapel (Teacher tapi bukan Homeroom)
+  const isSubjectTeacher = isTeacher && !isHomeroom;
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
-      {/* MOBILE OVERLAY (Backdrop) */}
-      {isSidebarOpen && (
-        <div 
-            className="fixed inset-0 bg-black/50 z-20 md:hidden transition-opacity"
-            onClick={() => setIsSidebarOpen(false)}
-        />
+    <div className="flex h-screen bg-gray-100">
+      {/* Sidebar Mobile Overlay */}
+      {isOpen && (
+        <div className="fixed inset-0 z-20 bg-black bg-opacity-50 md:hidden" onClick={() => setIsOpen(false)} />
       )}
 
-      {/* SIDEBAR */}
-      <aside 
-        className={`
-            fixed inset-y-0 left-0 z-30 w-64 bg-midnight-900 text-white flex flex-col shadow-xl 
-            transform transition-transform duration-300 ease-in-out
-            md:relative md:translate-x-0 
-            ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        `}
-      >
-        <div className="p-6 border-b border-gray-700 bg-midnight-800 flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-bold text-senja-400">SENJA DIGITAL</h1>
-            <p className="text-xs text-gray-400 mt-1">SD NEGERI 5 BILATO</p>
+      {/* Sidebar */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out
+        md:relative md:translate-x-0
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="p-6 border-b flex flex-col items-center text-center">
+          
+          <div className="relative w-24 h-24 mb-3 flex items-center justify-center">
+             {!imgError ? (
+                <img 
+                  src={DEFAULT_LOGO_URL} 
+                  alt="Logo" 
+                  className="w-full h-full object-contain"
+                  onError={() => setImgError(true)}
+                />
+             ) : (
+                <div className="w-full h-full bg-blue-100 rounded-full flex items-center justify-center text-blue-600 border-4 border-white shadow-sm">
+                   <School size={48} />
+                </div>
+             )}
           </div>
-          {/* Close Button Mobile Only */}
-          <button 
-            onClick={() => setIsSidebarOpen(false)}
-            className="md:hidden text-gray-400 hover:text-white"
-          >
-            <X size={24} />
-          </button>
-        </div>
-        
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-senja-500 flex items-center justify-center text-white font-bold shrink-0">
-              {user.name.charAt(0)}
-            </div>
-            <div className="overflow-hidden">
-              <p className="text-sm font-medium truncate">{user.name}</p>
-              <p className="text-xs text-gray-400 capitalize truncate">{user.role === Role.TEACHER ? 'Wali Kelas' : user.role.toLowerCase()}</p>
-            </div>
+
+          <h1 className="text-xl font-bold text-blue-700 leading-tight">SDN 5 BILATO</h1>
+          <p className="text-xs text-gray-500 mt-1">Sistem Absensi Terpadu</p>
+          <div className="mt-4 px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded-full inline-block">
+            TP: {activeYear}
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4">
-          <ul className="space-y-1 px-2">
-            {getMenuItems().map((item) => (
-              <li key={item.path}>
-                <Link
-                  to={item.path}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive(item.path)
-                      ? 'bg-senja-600 text-white shadow-md'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                >
-                  <item.icon size={20} className="shrink-0" />
-                  <span className="text-sm font-medium">{item.label}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+        <nav className="p-4 space-y-1 overflow-y-auto h-[calc(100vh-220px)]">
+          {!isParent && <MenuItem to="/" icon={LayoutDashboard} label="Dashboard" />}
+          
+          {/* DATA SISWA: Muncul untuk Admin, Wali Kelas, dan Guru Mapel */}
+          {(isAdmin || isTeacher) && (
+            <MenuItem to="/students" icon={Users} label="Data Siswa" />
+          )}
+
+          {/* ABSENSI HARIAN: Hanya Admin & Wali Kelas */}
+          {(isAdmin || isHomeroom) && (
+            <MenuItem to="/attendance" icon={UserCheck} label="Absensi Harian" />
+          )}
+
+          {/* ABSENSI MAPEL: Admin & Guru Mapel (Wali Kelas tidak melihat ini) */}
+          {(isAdmin || isSubjectTeacher) && (
+             <MenuItem to="/attendance-subject" icon={ClipboardList} label="Absensi Mapel" />
+          )}
+
+          {/* LAPORAN BULANAN (Dulu Laporan Harian): Hanya Admin & Wali Kelas */}
+          {(isAdmin || isHomeroom) && (
+            <MenuItem to="/report" icon={FileText} label="Laporan Bulanan" />
+          )}
+
+          {/* LAPORAN MAPEL: Admin & Guru Mapel (Wali Kelas tidak melihat ini) */}
+          {(isAdmin || isSubjectTeacher) && (
+             <MenuItem to="/report-subject" icon={Printer} label="Laporan Mapel" />
+          )}
+
+          {isAdmin && (
+             <>
+               <div className="pt-2 pb-1 text-xs font-bold text-gray-400 uppercase px-4">Administrasi</div>
+               <MenuItem to="/teachers" icon={UserCog} label="Wali Kelas & Guru" />
+               <MenuItem to="/subjects" icon={BookOpen} label="Data Mata Pelajaran" />
+               <MenuItem to="/academic-years" icon={Clock} label="Tahun Pelajaran" />
+               <MenuItem to="/holidays" icon={Calendar} label="Hari Libur" />
+               <MenuItem to="/headmaster" icon={Settings} label="Data Kepala Sekolah" />
+               <MenuItem to="/users" icon={Users} label="Manajemen User" />
+             </>
+          )}
+
+          {(isAdmin || isTeacher) && (
+            <>
+              <div className="pt-2 pb-1 text-xs font-bold text-gray-400 uppercase px-4">Lainnya</div>
+              <MenuItem to="/alumni" icon={GraduationCap} label="Daftar Alumni" />
+              <MenuItem to="/settings" icon={Database} label="Database & Sync" />
+            </>
+          )}
+
+          {isParent && (
+            <>
+              <MenuItem to="/parent-dashboard" icon={UserCheck} label="Info Siswa" />
+            </>
+          )}
         </nav>
 
-        <div className="p-4 border-t border-gray-700">
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-3 w-full px-4 py-2 text-red-400 hover:bg-red-900/20 hover:text-red-300 rounded-lg transition-colors"
+        <div className="absolute bottom-0 w-full p-4 border-t bg-white">
+          <div className="mb-2 text-sm text-gray-600 font-medium truncate">
+            {currentUser.name}
+          </div>
+          <button 
+            onClick={logout}
+            className="flex items-center space-x-2 text-red-600 hover:text-red-700 w-full px-2 py-2 hover:bg-red-50 rounded"
           >
-            <LogOut size={20} className="shrink-0" />
-            <span className="text-sm font-medium">Keluar</span>
+            <LogOut size={18} />
+            <span>Logout</span>
           </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT WRAPPER */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden w-full">
-        
-        {/* MOBILE HEADER */}
-        <header className="md:hidden bg-white border-b p-4 flex items-center justify-between shadow-sm z-10">
-            <div className="flex items-center gap-3">
-                <button 
-                    onClick={() => setIsSidebarOpen(true)}
-                    className="text-gray-600 hover:text-senja-600 p-1"
-                >
-                    <Menu size={28} />
-                </button>
-                <span className="font-bold text-gray-800">SENJA DIGITAL</span>
-            </div>
-            <div className="w-8 h-8 rounded-full bg-senja-500 flex items-center justify-center text-white text-xs font-bold">
-              {user.name.charAt(0)}
-            </div>
-        </header>
-
-        {/* SCROLLABLE CONTENT AREA */}
-        <main className="flex-1 overflow-y-auto bg-gray-50 relative w-full">
-          <div className="p-4 md:p-8 pb-20 md:pb-8 w-full max-w-full overflow-x-hidden">
-            {children}
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden">
+        <header className="bg-white shadow-sm z-10 p-4 flex justify-between items-center">
+          <div className="flex items-center">
+             <button onClick={() => setIsOpen(!isOpen)} className="text-gray-600 md:hidden mr-4">
+               {isOpen ? <X /> : <Menu />}
+             </button>
+             <span className="font-bold text-gray-700 md:hidden">Menu</span>
           </div>
+          <div className="flex items-center gap-4">
+            {isSyncing ? (
+              <span className="flex items-center space-x-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full border border-blue-200">
+                <RefreshCw size={12} className="animate-spin" />
+                <span>Syncing...</span>
+              </span>
+            ) : lastSync ? (
+              <span className="hidden md:flex items-center space-x-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-200" title={`Last synced: ${lastSync}`}>
+                <Cloud size={12} />
+                <span>Synced</span>
+              </span>
+            ) : null}
+            <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full border border-green-200">
+              ● Sistem Aktif
+            </span>
+          </div>
+        </header>
+        
+        <main className="flex-1 overflow-auto p-4 md:p-8">
+          {children}
         </main>
       </div>
     </div>
